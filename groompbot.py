@@ -54,18 +54,12 @@ def takeAndSubmit(settings, subreddit, feed):
         videoid = getVideoIdFromEntry(entry)
 
         # Check if someone else already uploaded it
-        escape = False
         for post in pastVideos:
-            if (videoid in post):
-                escape = True
-                break
-
-        if escape:
-            continue
-
-        # Submit
-        print "Submitting %s" % title
-        submitContent(subreddit, title, url)
+            if (videoid in post): break
+        else:
+            # Submit
+            print "Submitting %s" % title
+            submitContent(subreddit, title, url)
 
 def loadSettings():
     """Load settings from file."""
