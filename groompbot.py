@@ -22,7 +22,11 @@ def getVideoIdFromEntry(entry):
 def getReddit(settings):
     """Get a reference to Reddit."""
     r = praw.Reddit(user_agent=settings["reddit_ua"])
-    r.login(settings["reddit_username"], settings["reddit_password"])
+    try:
+        r.login(settings["reddit_username"], settings["reddit_password"])
+    except urllib2.URLError, e:
+        print "Error logging into Reddit. (%s)" % e
+        sys.exit(1)
     return r
 
 def getSubreddit(settings, reddit):
