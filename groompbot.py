@@ -133,23 +133,33 @@ def runBot():
 
     # Download video list
     uploads = getUserUploads(settings["youtube_account"]).entry
-    
-    # Hold first entry (newest)
     newestUpload = uploads[0]
-    if (getVideoIdFromEntry(newestUpload) == settings["youtube_lastupload"]):
-        logging.info("No new uploaded videos.")
-        exitApp()
-    
-    # Reverse from old to new
+
+    # Reverse from new to old, to old to new
     uploads.reverse()
     
+    # Only get new uploads
+    try:
+        videoIdList = map(getVideoIdFromEntry, uploads)
+        indexOfLastUpload = videoIdList.index(settings["youtube_lastupload"])
+        newUploads = uploads[indexOfLastUpload + 1:]
+        if (len(newUploads) == 0):
+            logging.info("No new uploads since last run.")
+            exitApp()
+    except ValueError:
+        # Ignore a failure if lastupload value isn't in list
+        pass
+
+    # Get reddit stuff
     logging.info("Logging into Reddit.")
     reddit = getReddit(settings)
     sr = getSubreddit(settings, reddit)
     
+    # Submit entries
     logging.info("Submitting to Reddit.")
-    takeAndSubmit(settings, sr, uploads)
+    takeAndSubmit(settings, sr, newUploads)
     
+    # Save newest position
     logging.info("Saving position.")
     videoid = getVideoIdFromEntry(newestUpload)
     savePosition(videoid)
