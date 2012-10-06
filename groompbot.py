@@ -3,6 +3,7 @@
 
 # Imports
 import sys
+import logging
 import json
 import praw
 import gdata.youtube.service
@@ -24,9 +25,9 @@ def getReddit(settings):
     r = praw.Reddit(user_agent=settings["reddit_ua"])
     try:
         r.login(settings["reddit_username"], settings["reddit_password"])
-    except urllib2.URLError, e:
-        print "Error logging into Reddit. (%s)" % e
-        sys.exit(1)
+    except:
+        logging.exception("Error logging into Reddit.")
+        exitApp()
     return r
 
 def getSubreddit(settings, reddit):
@@ -35,10 +36,11 @@ def getSubreddit(settings, reddit):
 
 def submitContent(subreddit, title, link):
     """Submit a link to a subreddit."""
+    logging.info("Submitting %s (%s)", (title, link))
     try:
         subreddit.submit(title, url=link)
-    except praw.errors.APIException, e:
-        print "Error on submit: %s" % e
+    except praw.errors.APIException:
+        logging.exception("Error on link submission.")
 
 def getPastVideos(subreddit):
     """Get all YouTube videos posted in the past hour."""
@@ -56,48 +58,49 @@ def takeAndSubmit(settings, subreddit, feed):
         title = unicode(entry.title.text, "utf-8")
         url = entry.media.player.url
         videoid = getVideoIdFromEntry(entry)
+        logging.debug("Video: %s (%s)", (title, url))
 
         # Check if someone else already uploaded it
         for post in pastVideos:
-            if (videoid in post): break
+            if (videoid in post):
+                logging.debug("Video found in past video list.")
+                break
         else:
-            # Submit
-            print "Submitting %s" % title
             submitContent(subreddit, title, url)
 
 def loadSettings():
     """Load settings from file."""
     try:
         settingsFile = open("settings.json", "r")
-    except IOError, e:
-        print "Error opening settings.json! Exiting. (%s)" % e
-        sys.exit(1)
+    except IOError:
+        logging.exception("Error opening settings.json.")
+        exitApp()
     
     settingStr = settingsFile.read()
     settingsFile.close()
 
     try:
         settings = json.loads(settingStr)
-    except ValueError, e:
-        print "Error parsing settings.json! Exiting. (%s)" % e
-        sys.exit(1)
+    except ValueError:
+        logging.exception("Error parsing settings.json.")
+        exitApp()
     
     # Check integrity
     if (len(settings["reddit_username"]) == 0):
-        print "Reddit username not set. Exiting."
-        sys.exit(1)
+        logging.critical("Reddit username not set.")
+        exitApp()
 
     if (len(settings["reddit_password"]) == 0):
-        print "Reddit password not set. Exiting."
-        sys.exit(1)
+        logging.critical("Reddit password not set.")
+        exitApp()
 
     if (len(settings["reddit_subreddit"]) == 0):
-        print "Subreddit not set. Exiting."
-        sys.exit(1)
+        logging.critical("Subreddit not set. Exiting.")
+        exitApp()
 
     if (len(settings["youtube_account"]) == 0):
-        print "YouTube account not set. Exiting."
-        sys.exit(1)
+        logging.critical("YouTube account not set. Exiting.")
+        exitApp()
 
     # Get last upload position
     try:
@@ -107,6 +110,7 @@ def loadSettings():
 
         settings["youtube_lastupload"] = lastUpload
     except IOError:
+        logging.info("No last uploaded video found.")
         settings["youtube_lastupload"] = None
 
     return settings
@@ -117,12 +121,15 @@ def savePosition(position):
     lastUploadFile.write(position)
     lastUploadFile.close()
 
+def exitApp():
+    sys.exit(1)
+
 def runBot():
     """Start a run of the bot."""
-    print "Starting bot."
+    logging.info("Starting bot.")
     settings = loadSettings()
 
-    print "Getting YouTube videos..."
+    logging.info("Getting YouTube videos.")
 
     # Download video list
     uploads = getUserUploads(settings["youtube_account"]).entry
@@ -130,24 +137,33 @@ def runBot():
     # Hold first entry (newest)
     newestUpload = uploads[0]
     if (getVideoIdFromEntry(newestUpload) == settings["youtube_lastupload"]):
-        print "No new uploaded videos. Exiting."
-        sys.exit(1)
+        logging.info("No new uploaded videos.")
+        exitApp()
     
     # Reverse from old to new
     uploads.reverse()
     
-    print "Logging into Reddit..."
+    logging.info("Logging into Reddit.")
     reddit = getReddit(settings)
     sr = getSubreddit(settings, reddit)
     
-    print "Submitting to Reddit..."
+    logging.info("Submitting to Reddit.")
     takeAndSubmit(settings, sr, uploads)
     
-    print "Saving position..."
+    logging.info("Saving position.")
     videoid = getVideoIdFromEntry(newestUpload)
     savePosition(videoid)
     
-    print "Done!"
+    logging.info("Done!")
 
 if __name__ == "__main__":
-    runBot()
+    logging.basicConfig()
+
+    try:
+        runBot()
+    except SystemExit:
+        logging.info("Exit called.")
+    except:
+        logging.exception("Uncaught exception.")
+
+    logging.shutdown()
