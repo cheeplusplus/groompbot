@@ -142,8 +142,8 @@ def runBot():
     try:
         videoIdList = map(getVideoIdFromEntry, uploads)
         indexOfLastUpload = videoIdList.index(settings["youtube_lastupload"])
-        newUploads = uploads[indexOfLastUpload + 1:]
-        if (len(newUploads) == 0):
+        uploads = uploads[indexOfLastUpload + 1:]
+        if (len(uploads) == 0):
             logging.info("No new uploads since last run.")
             exitApp()
     except ValueError:
@@ -157,7 +157,7 @@ def runBot():
     
     # Submit entries
     logging.info("Submitting to Reddit.")
-    takeAndSubmit(settings, sr, newUploads)
+    takeAndSubmit(settings, sr, uploads)
     
     # Save newest position
     logging.info("Saving position.")
