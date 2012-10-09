@@ -52,7 +52,9 @@ def getPastVideos(subreddit):
 # Main functions
 def takeAndSubmit(settings, subreddit, feed):
     """Iterate through each YouTube feed entry and submit to Reddit."""
-    pastVideos = list(getPastVideos(subreddit))
+    pastVideos = []
+    if (settings["repost_protection"]):
+        pastVideos = list(getPastVideos(subreddit))
 
     for entry in feed:
         title = unicode(entry.title.text, "utf-8")
@@ -95,12 +97,18 @@ def loadSettings():
         exitApp()
 
     if (len(settings["reddit_subreddit"]) == 0):
-        logging.critical("Subreddit not set. Exiting.")
+        logging.critical("Subreddit not set.")
+        exitApp()
+
+    if (len(settings["reddit_ua"]) == 0):
+        logging.critical("Reddit bot user agent not set.")
         exitApp()
 
     if (len(settings["youtube_account"]) == 0):
-        logging.critical("YouTube account not set. Exiting.")
+        logging.critical("YouTube account not set.")
         exitApp()
+
+    settings["repost_protection"] = bool(settings["repost_protection"])
 
     # Get last upload position
     try:
