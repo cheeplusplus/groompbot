@@ -18,7 +18,12 @@ Configuration for the bot is set up in the settings.json file. The configuration
 Dependencies
 ------------
 
-Groombot depends on the following external libraries:
+Groompbot depends on the following external libraries:
 
 * [praw](https://github.com/praw-dev/praw/) - Reddit library
 * [gdata](http://code.google.com/p/gdata-python-client/) - Google Data API
+
+License
+-------
+
+Groompbot is free to use under the MIT License.
