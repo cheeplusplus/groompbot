@@ -14,7 +14,9 @@ develop-eggs
 .installed.cfg
 lib
 lib64
+ENV
 
 # Project specific
 settings.json
 lastupload.txt
+lastupload.json

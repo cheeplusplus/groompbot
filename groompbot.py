@@ -6,171 +6,224 @@ import sys
 import logging
 import json
 import praw
-import gdata.youtube.service
+import requests
 
 # YouTube functions
-def getUserUploads(username):
+def get_playlist_uploads(api_key, playlist, etag=None):
     """Get YouTube uploads by username."""
-    yt_service = gdata.youtube.service.YouTubeService()
-    uri = "http://gdata.youtube.com/feeds/api/users/%s/uploads" % username
-    return yt_service.GetYouTubeVideoFeed(uri)
+    uri = "https://www.googleapis.com/youtube/v3/playlistItems"
+    payload = {"part": "snippet", "playlistId": playlist, "maxResults": 5, "key": api_key}
 
-def getVideoIdFromEntry(entry):
+    # Use the etag
+    if etag:
+        headers = {"If-None-Match": etag}
+    else:
+        headers = None
+
+    r = requests.get(uri, params=payload, headers=headers)
+    if r.status_code == 304:
+        # Nothing has changed since the last execution
+        return None
+
+    js = r.json()
+    return js
+
+def get_videoId_from_entry(entry):
     """Get video ID from a YouTube entry."""
-    return entry.id.text.split("/")[-1]
+    return entry["snippet"]["resourceId"]["videoId"]
 
 # Reddit functions
-def getReddit(settings):
+def get_reddit(settings):
     """Get a reference to Reddit."""
     r = praw.Reddit(user_agent=settings["reddit_ua"])
     try:
         r.login(settings["reddit_username"], settings["reddit_password"])
     except:
         logging.exception("Error logging into Reddit.")
-        exitApp()
+        exit_app()
     return r
 
-def getSubreddit(settings, reddit):
+def get_subreddit(settings, reddit):
     """Get the subreddit."""
     return reddit.get_subreddit(settings["reddit_subreddit"])
 
-def submitContent(subreddit, title, link):
+def submit_content(subreddit, title, link):
     """Submit a link to a subreddit."""
-    logging.info("Submitting %s (%s)", (title, link))
+    logging.info("Submitting %s (%s)" % (title, link))
     try:
         subreddit.submit(title, url=link)
     except praw.errors.APIException:
         logging.exception("Error on link submission.")
 
-def getPastVideos(subreddit):
+def get_past_video_urls(subreddit):
     """Get all YouTube videos posted in the past hour."""
-    hour = subreddit.get_new_by_date()
+    hour = subreddit.get_new()
     for video in hour:
-        if ("youtube" in video.url):
+        if ("youtube" in video.url) or ("youtu.be" in video.url):
             yield video.url
 
 # Main functions
-def takeAndSubmit(settings, subreddit, feed):
+def submit_feed_to_subreddit(settings, subreddit, feed):
     """Iterate through each YouTube feed entry and submit to Reddit."""
-    pastVideos = []
-    if (settings["repost_protection"]):
-        pastVideos = list(getPastVideos(subreddit))
+    past_video_urls = []
+    if settings["repost_protection"]:
+        past_video_urls = list(get_past_video_urls(subreddit))
+        print past_video_urls
 
     for entry in feed:
-        title = unicode(entry.title.text, "utf-8")
-        url = entry.media.player.url
-        videoid = getVideoIdFromEntry(entry)
-        logging.debug("Video: %s (%s)", (title, url))
+        title = entry["snippet"]["title"]
+        video_id = get_videoId_from_entry(entry)
+        url = "https://www.youtube.com/watch?v=%s" % video_id
+
+        logging.debug("Video: %s (%s)" % (title, url))
 
         # Check if someone else already uploaded it
-        for post in pastVideos:
-            if (videoid in post):
+        for post_url in past_video_urls:
+            if video_id in post_url:
                 logging.debug("Video found in past video list.")
                 break
         else:
-            submitContent(subreddit, title, url)
+            submit_content(subreddit, title, url)
 
-def loadSettings():
+def load_settings():
     """Load settings from file."""
     try:
-        settingsFile = open("settings.json", "r")
+        settings_file = open("settings.json", "r")
     except IOError:
         logging.exception("Error opening settings.json.")
-        exitApp()
+        exit_app()
     
-    settingStr = settingsFile.read()
-    settingsFile.close()
+    setting_str = settings_file.read()
+    settings_file.close()
 
     try:
-        settings = json.loads(settingStr)
+        settings = json.loads(setting_str)
     except ValueError:
         logging.exception("Error parsing settings.json.")
-        exitApp()
+        exit_app()
     
     # Check integrity
-    if (len(settings["reddit_username"]) == 0):
+    if len(settings["reddit_username"]) == 0:
         logging.critical("Reddit username not set.")
-        exitApp()
+        exit_app()
 
-    if (len(settings["reddit_password"]) == 0):
+    if len(settings["reddit_password"]) == 0:
         logging.critical("Reddit password not set.")
-        exitApp()
+        exit_app()
 
-    if (len(settings["reddit_subreddit"]) == 0):
+    if len(settings["reddit_subreddit"]) == 0:
         logging.critical("Subreddit not set.")
-        exitApp()
+        exit_app()
 
-    if (len(settings["reddit_ua"]) == 0):
+    if len(settings["reddit_ua"]) == 0:
         logging.critical("Reddit bot user agent not set.")
-        exitApp()
+        exit_app()
 
-    if (len(settings["youtube_account"]) == 0):
-        logging.critical("YouTube account not set.")
-        exitApp()
+    if len(settings["youtube_playlists"]) == 0:
+        logging.critical("YouTube playlist not set.")
+        exit_app()
+
+    # Coerce single string to list
+    if isinstance(settings["youtube_playlists"], basestring):
+        settings["youtube_playlists"] = [settings["youtube_playlists"]]
+
+    if len(settings["youtube_api_key"]) == 0:
+        logging.critical("YouTube API key not set.")
+        exit_app()
 
     settings["repost_protection"] = bool(settings["repost_protection"])
 
     # Get last upload position
     try:
-        lastUploadFile = open("lastupload.txt", "r")
-        lastUpload = lastUploadFile.read()
-        lastUploadFile.close()
+        last_upload_file = open("lastupload.json", "r")
+        last_upload_str = last_upload_file.read()
+        last_upload_file.close()
 
-        settings["youtube_lastupload"] = lastUpload
-    except IOError:
+        settings["youtube_lastupload"] = json.loads(last_upload_str)
+        if not isinstance(settings["youtube_lastupload"], dict):
+            settings["youtube_lastupload"] = {}
+
+    except (IOError, ValueError):
         logging.info("No last uploaded video found.")
-        settings["youtube_lastupload"] = None
+        settings["youtube_lastupload"] = {}
 
     return settings
 
-def savePosition(position):
-    """Write last position to file."""
-    lastUploadFile = open("lastupload.txt", "w")
-    lastUploadFile.write(position)
-    lastUploadFile.close()
+def save_positions(settings):
+    """Write most recent list of video IDs to file."""
+    last_upload_file = open("lastupload.json", "w")
+    last_upload_file.write(json.dumps(settings["youtube_lastupload"]))
+    last_upload_file.close()
 
-def exitApp():
+def exit_app():
     sys.exit(1)
 
-def runBot():
+def run_bot():
     """Start a run of the bot."""
     logging.info("Starting bot.")
-    settings = loadSettings()
+    settings = load_settings()
 
     logging.info("Getting YouTube videos.")
+    all_uploads = []
 
     # Download video list
-    uploads = getUserUploads(settings["youtube_account"]).entry
-    newestUpload = uploads[0]
+    for playlist in settings["youtube_playlists"]:
+        # Create new lastupload format for playlist if it doesn't exist
+        if not playlist in settings["youtube_lastupload"]:
+            settings["youtube_lastupload"][playlist] = {"recent": [], "etag": None}
 
-    # Reverse from new to old, to old to new
-    uploads.reverse()
-    
-    # Only get new uploads
-    try:
-        videoIdList = map(getVideoIdFromEntry, uploads)
-        indexOfLastUpload = videoIdList.index(settings["youtube_lastupload"])
-        uploads = uploads[indexOfLastUpload + 1:]
-        if (len(uploads) == 0):
-            logging.info("No new uploads since last run.")
-            exitApp()
-    except ValueError:
-        # Ignore a failure if lastupload value isn't in list
-        pass
+        # Get ETag
+        try:
+            etag = settings["youtube_lastupload"][playlist]["etag"]
+        except KeyError:
+            etag = None
+
+        # Get uploads
+        items = get_playlist_uploads(settings["youtube_api_key"], playlist, etag)
+        if not items:
+            # No items, probably due to etag
+            continue
+
+        etag = items["etag"]
+        uploads = items["items"]
+        recent_ids = map(get_videoId_from_entry, uploads)
+
+        # Reverse from new to old, to old to new
+        uploads.reverse()
+
+        # Only get new uploads
+        if len(settings["youtube_lastupload"][playlist]["recent"]) > 0:
+            try:
+                video_id_ordered = map(get_videoId_from_entry, uploads)
+                last_upload_index = video_id_ordered.index(settings["youtube_lastupload"][playlist]["recent"][0])
+                uploads = uploads[last_upload_index + 1:]
+            except ValueError:
+                # Ignore a failure if lastupload value isn't in list
+                pass
+
+        # Update marker
+        settings["youtube_lastupload"][playlist]["recent"] = recent_ids
+        settings["youtube_lastupload"][playlist]["etag"] = etag
+
+        all_uploads.extend(uploads)
+
+    if len(all_uploads) == 0:
+        logging.info("No new uploads since last run.")
+        exit_app()
+        return
 
     # Get reddit stuff
     logging.info("Logging into Reddit.")
-    reddit = getReddit(settings)
-    sr = getSubreddit(settings, reddit)
+    reddit = get_reddit(settings)
+    sr = get_subreddit(settings, reddit)
     
     # Submit entries
     logging.info("Submitting to Reddit.")
-    takeAndSubmit(settings, sr, uploads)
+    submit_feed_to_subreddit(settings, sr, all_uploads)
     
     # Save newest position
     logging.info("Saving position.")
-    videoid = getVideoIdFromEntry(newestUpload)
-    savePosition(videoid)
+    save_positions(settings)
     
     logging.info("Done!")
 
@@ -178,7 +231,7 @@ if __name__ == "__main__":
     logging.basicConfig()
 
     try:
-        runBot()
+        run_bot()
     except SystemExit:
         logging.info("Exit called.")
     except:
