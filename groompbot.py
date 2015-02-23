@@ -182,29 +182,26 @@ def run_bot():
         items = get_playlist_uploads(settings["youtube_api_key"], playlist, etag)
         if not items:
             # No items, probably due to etag
+            logging.debug("Playlist %s returned no results", playlist)
             continue
 
         etag = items["etag"]
         uploads = items["items"]
         recent_ids = map(get_videoId_from_entry, uploads)
+        logging.info("Playlist %s got %d items" % (playlist, len(uploads)))
 
         # Reverse from new to old, to old to new
         uploads.reverse()
 
         # Only get new uploads
         if len(settings["youtube_lastupload"][playlist]["recent"]) > 0:
-            try:
-                video_id_ordered = map(get_videoId_from_entry, uploads)
-                last_upload_index = video_id_ordered.index(settings["youtube_lastupload"][playlist]["recent"][0])
-                uploads = uploads[last_upload_index + 1:]
-            except ValueError:
-                # Ignore a failure if lastupload value isn't in list
-                pass
+            uploads = [x for x in uploads if get_videoId_from_entry(x) not in settings["youtube_lastupload"][playlist]["recent"]]
 
         # Update marker
         settings["youtube_lastupload"][playlist]["recent"] = recent_ids
         settings["youtube_lastupload"][playlist]["etag"] = etag
 
+        logging.info("Adding %d uploads from playlist %s" % (len(uploads), playlist))
         all_uploads.extend(uploads)
 
     if len(all_uploads) == 0:
