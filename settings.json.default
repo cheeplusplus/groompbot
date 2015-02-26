@@ -3,7 +3,6 @@
 	"reddit_password": "",
 	"reddit_subreddit": "",
 	"reddit_ua": "",
-	"youtube_api_key": "",
-	"youtube_playlists": [""],
+	"youtube_targets": {"from": "", "to": ""},
 	"repost_protection": true
 }

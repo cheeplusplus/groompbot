@@ -4,33 +4,21 @@
 # Imports
 import sys
 import logging
+import argparse
 import json
 import praw
-import requests
+import gdata.youtube.service
 
 # YouTube functions
-def get_playlist_uploads(api_key, playlist, etag=None):
+def get_playlist_uploads(username):
     """Get YouTube uploads by username."""
-    uri = "https://www.googleapis.com/youtube/v3/playlistItems"
-    payload = {"part": "snippet", "playlistId": playlist, "maxResults": 5, "key": api_key}
-
-    # Use the etag
-    if etag:
-        headers = {"If-None-Match": etag}
-    else:
-        headers = None
-
-    r = requests.get(uri, params=payload, headers=headers)
-    if r.status_code == 304:
-        # Nothing has changed since the last execution
-        return None
-
-    js = r.json()
-    return js
+    yt_service = gdata.youtube.service.YouTubeService()
+    uri = "http://gdata.youtube.com/feeds/api/users/%s/uploads" % username
+    return yt_service.GetYouTubeVideoFeed(uri)
 
 def get_videoId_from_entry(entry):
     """Get video ID from a YouTube entry."""
-    return entry["snippet"]["resourceId"]["videoId"]
+    return entry.id.text.split("/")[-1]
 
 # Reddit functions
 def get_reddit(settings):
@@ -43,13 +31,12 @@ def get_reddit(settings):
         exit_app()
     return r
 
-def get_subreddit(settings, reddit):
-    """Get the subreddit."""
-    return reddit.get_subreddit(settings["reddit_subreddit"])
-
-def submit_content(subreddit, title, link):
+def submit_content(subreddit, title, link, fake_post=False):
     """Submit a link to a subreddit."""
     logging.info("Submitting %s (%s)" % (title, link))
+    if fake_post:
+        return
+
     try:
         subreddit.submit(title, url=link)
     except praw.errors.APIException:
@@ -63,17 +50,17 @@ def get_past_video_urls(subreddit):
             yield video.url
 
 # Main functions
-def submit_feed_to_subreddit(settings, subreddit, feed):
+def submit_feed_to_subreddit(subreddit, feed, repost_protection=False, fake_post=False):
     """Iterate through each YouTube feed entry and submit to Reddit."""
     past_video_urls = []
-    if settings["repost_protection"]:
+    if repost_protection:
         past_video_urls = list(get_past_video_urls(subreddit))
         print past_video_urls
 
     for entry in feed:
-        title = entry["snippet"]["title"]
+        title = unicode(entry.title.text, "utf-8")
+        url = entry.media.player.url
         video_id = get_videoId_from_entry(entry)
-        url = "https://www.youtube.com/watch?v=%s" % video_id
 
         logging.debug("Video: %s (%s)" % (title, url))
 
@@ -83,7 +70,7 @@ def submit_feed_to_subreddit(settings, subreddit, feed):
                 logging.debug("Video found in past video list.")
                 break
         else:
-            submit_content(subreddit, title, url)
+            submit_content(subreddit, title, url, fake_post)
 
 def load_settings():
     """Load settings from file."""
@@ -119,16 +106,17 @@ def load_settings():
         logging.critical("Reddit bot user agent not set.")
         exit_app()
 
-    if len(settings["youtube_playlists"]) == 0:
-        logging.critical("YouTube playlist not set.")
+    if len(settings["youtube_targets"]) == 0:
+        logging.critical("YouTube targets not set.")
         exit_app()
 
-    # Coerce single string to list
-    if isinstance(settings["youtube_playlists"], basestring):
-        settings["youtube_playlists"] = [settings["youtube_playlists"]]
+    # Coerce list
+    if isinstance(settings["youtube_targets"], dict):
+        settings["youtube_targets"] = [settings["youtube_targets"]]
 
-    if len(settings["youtube_api_key"]) == 0:
-        logging.critical("YouTube API key not set.")
+    # Enforce list
+    if not isinstance(settings["youtube_targets"], list):
+        logging.critical("YouTube targets not in correct format.")
         exit_app()
 
     settings["repost_protection"] = bool(settings["repost_protection"])
@@ -158,7 +146,7 @@ def save_positions(settings):
 def exit_app():
     sys.exit(1)
 
-def run_bot():
+def run_bot(args):
     """Start a run of the bot."""
     logging.info("Starting bot.")
     settings = load_settings()
@@ -167,56 +155,62 @@ def run_bot():
     all_uploads = []
 
     # Download video list
-    for playlist in settings["youtube_playlists"]:
-        # Create new lastupload format for playlist if it doesn't exist
-        if not playlist in settings["youtube_lastupload"]:
-            settings["youtube_lastupload"][playlist] = {"recent": [], "etag": None}
+    for target in settings["youtube_targets"]:
+        channel = target["from"]
+        subreddits = target["to"]
+        if isinstance(subreddits, basestring):
+            subreddits = [subreddits]
 
-        # Get ETag
-        try:
-            etag = settings["youtube_lastupload"][playlist]["etag"]
-        except KeyError:
-            etag = None
+        # Create new lastupload format for channel if it doesn't exist
+        if not channel in settings["youtube_lastupload"]:
+            settings["youtube_lastupload"][channel] = {"recent": []}
 
         # Get uploads
-        items = get_playlist_uploads(settings["youtube_api_key"], playlist, etag)
-        if not items:
+        uploads = get_playlist_uploads(channel)
+        if not uploads or not uploads.entry:
             # No items, probably due to etag
-            logging.debug("Playlist %s returned no results", playlist)
+            logging.debug("Playlist %s returned no results", channel)
             continue
 
-        etag = items["etag"]
-        uploads = items["items"]
+        uploads = uploads.entry
+
         recent_ids = map(get_videoId_from_entry, uploads)
-        logging.info("Playlist %s got %d items" % (playlist, len(uploads)))
+        logging.info("Playlist %s got %d items" % (channel, len(uploads)))
 
         # Reverse from new to old, to old to new
         uploads.reverse()
 
         # Only get new uploads
-        if len(settings["youtube_lastupload"][playlist]["recent"]) > 0:
-            uploads = [x for x in uploads if get_videoId_from_entry(x) not in settings["youtube_lastupload"][playlist]["recent"]]
+        if len(settings["youtube_lastupload"][channel]["recent"]) > 0:
+            uploads = [x for x in uploads if get_videoId_from_entry(x) not in settings["youtube_lastupload"][channel]["recent"]]
 
         # Update marker
-        settings["youtube_lastupload"][playlist]["recent"] = recent_ids
-        settings["youtube_lastupload"][playlist]["etag"] = etag
+        settings["youtube_lastupload"][channel]["recent"] = recent_ids
 
-        logging.info("Adding %d uploads from playlist %s" % (len(uploads), playlist))
-        all_uploads.extend(uploads)
+        logging.info("Adding %d uploads from channel %s" % (len(uploads), channel))
+        if len(uploads) > 0:
+            all_uploads.append((subreddits, uploads))
 
     if len(all_uploads) == 0:
         logging.info("No new uploads since last run.")
-        exit_app()
         return
 
     # Get reddit stuff
     logging.info("Logging into Reddit.")
     reddit = get_reddit(settings)
-    sr = get_subreddit(settings, reddit)
-    
+    all_subreddits = {}
+
+    # Collect all subreddits
+    for subreddits, uploads in all_uploads:
+        for subreddit in subreddits:
+            if subreddit not in all_subreddits:
+                all_subreddits.update({subreddit: reddit.get_subreddit(subreddit)})
+
     # Submit entries
     logging.info("Submitting to Reddit.")
-    submit_feed_to_subreddit(settings, sr, all_uploads)
+    for subreddits, uploads in all_uploads:
+        for subreddit in subreddits:
+            submit_feed_to_subreddit(all_subreddits[subreddit], uploads, settings["repost_protection"], args.fake)
     
     # Save newest position
     logging.info("Saving position.")
@@ -225,10 +219,19 @@ def run_bot():
     logging.info("Done!")
 
 if __name__ == "__main__":
-    logging.basicConfig()
+    parser = argparse.ArgumentParser(description="Post YouTube videos to Reddit.")
+    parser.add_argument("--verbose", dest="verbose", action="store_true", help="Verbose output.")
+    parser.add_argument("--fake", dest="fake", action="store_true", help="Don't actually submit to Reddit.")
+    args = parser.parse_args()
+
+    level = logging.WARNING
+    if args.verbose:
+        level = logging.DEBUG
+
+    logging.basicConfig(level=level)
 
     try:
-        run_bot()
+        run_bot(args)
     except SystemExit:
         logging.info("Exit called.")
     except:

@@ -13,7 +13,18 @@ It's set up to be run by a cronfile, probably every minute or so at most.
 Configuration
 -------------
 
-Configuration for the bot is set up in the settings.json file. The configuration file (which should be copied from settings.json.default) should contain the reddit bot username, password, the subreddit to post to, an approperate useragent, and the YouTube API key and playlist ID(s) to read from.
+Configuration for the bot is set up in the settings.json file. The configuration file (which should be copied from settings.json.default) should contain the reddit bot username, password, an approperate useragent, and the YouTube channels to pull from attached to the subreddits to post to.
+
+The "youtube_targets" section should be a dictionary, or an array of dictionaries. Each dictionary should have a "from" key (the YouTube channel) and a "to" key, the latter of which can either be a string or an array of strings for which subreddits to post to.
+
+For example,
+
+    "youtube_targets": [
+        {"from": "youtubechannel", to: "subreddit"},
+        {"from": "anotherchannel", to: ["subredditA", "subredditB"]}
+    ]
+
+submits videos from `youtubechannel` to `subreddit`, and videos from `anotherchannel` to both `subredditA` and `subredditB`.
 
 Dependencies
 ------------
@@ -21,14 +32,7 @@ Dependencies
 Groompbot depends on the following external libraries:
 
 * [praw](https://github.com/praw-dev/praw/) - Reddit library
-
-YouTube info
-------------
-
-Due to changes in the YouTube v3 API, reading the info we want is a little more of a pain to get started.
-
-1. [Register your application with Google](https://console.developers.google.com/) so you can submit API requests. Create a server API access key, this is what will go into the settings file.
-2. Fetch the playlist IDs you want to read from. You can follow [these general directions](http://stackoverflow.com/a/13504900/151495) with the YouTube [API Explorer](https://developers.google.com/youtube/v3/docs/search/list).
+* [gdata](http://code.google.com/p/gdata-python-client/) - Google Data API
 
 License
 -------
