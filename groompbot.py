@@ -98,10 +98,6 @@ def load_settings():
         logging.critical("Reddit password not set.")
         exit_app()
 
-    if len(settings["reddit_subreddit"]) == 0:
-        logging.critical("Subreddit not set.")
-        exit_app()
-
     if len(settings["reddit_ua"]) == 0:
         logging.critical("Reddit bot user agent not set.")
         exit_app()
